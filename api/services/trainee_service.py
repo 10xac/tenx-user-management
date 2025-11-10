@@ -132,9 +132,13 @@ class TraineeService:
         try:
             if user_data['is_mock']:
                 result_json = self.cm.create_user(self.sg, user_data)
+                if isinstance(result_json, dict) and 'error' in result_json:
+                    return result_json
                 user_id = result_json['data']['register']['user']['id']
             else:
                 result_json = self.create_unconfirmed_user(user_data)
+                if isinstance(result_json, dict) and 'error' in result_json:
+                    return result_json
                 user_id = result_json['user']['id']
             print("user_id...", user_id)
             
@@ -143,7 +147,7 @@ class TraineeService:
             self._cleanup_resources('user')
             return TraineeResponse.error_response(
                 error_type="USER_CREATION_ERROR",
-                error_message="Duplicate email address",
+                error_message=str(e),
                 error_location="user_creation",
                 error_data=user_data
             )
