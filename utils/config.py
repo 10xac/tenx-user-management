@@ -91,6 +91,9 @@ def get_strapi_params(stage):
     elif stage.lower().startswith('prod'):
         root='cms'
         ssmkey="TENX_PROD_STRAPI_TOKEN" 
+    elif stage.lower().startswith('shared'):
+        root='sharedcms'
+        ssmkey="SHARED_PROD_STRAPI_TOKEN"
     else:  #stage.lower().startswith('dev')
         root='dev-cms'
         ssmkey="TENX_DEV_STRAPI_TOKEN"  
