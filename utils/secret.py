@@ -6,10 +6,240 @@ import subprocess
 import requests
 import tempfile
 import base64
+import logging
+import threading
 import boto3
 from botocore.exceptions import ClientError
+from typing import Optional, Dict, Any
 
 region_name = "us-east-1"
+
+# Cache configuration
+ENVDIR = os.environ.get("ENVDIR", ".envdir")
+CACHE_TTL_SECONDS = 7 * 24 * 60 * 60  # 7 days in seconds
+
+# In-memory cache: {secret_name: {"data": dict, "timestamp": float}}
+_secrets_cache: Dict[str, Dict[str, Any]] = {}
+_cache_lock = threading.Lock()
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Cache Utility Functions
+# =============================================================================
+
+def get_secrets_cache_filename(sname: str) -> str:
+    """
+    Get the cache filename for a given secret name.
+    Sanitizes the secret name for use as a filename.
+    """
+    sanitized = sname.replace("/", "_").replace("\\", "_")
+    os.makedirs(ENVDIR, exist_ok=True)
+    return os.path.join(ENVDIR, f"{sanitized}.json")
+
+
+def safe_read_json(filepath: str) -> Optional[Dict[str, Any]]:
+    """
+    Safely read JSON from a file. Returns None if file doesn't exist or is invalid.
+    """
+    try:
+        if os.path.exists(filepath):
+            with open(filepath, 'r') as f:
+                return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning(f"Failed to read JSON from {filepath}: {e}")
+    return None
+
+
+def atomic_write_json(filepath: str, data: Dict[str, Any]) -> bool:
+    """
+    Atomically write JSON to a file using a temporary file and rename.
+    Returns True on success, False on failure.
+    """
+    try:
+        os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
+        temp_path = filepath + ".tmp"
+        with open(temp_path, 'w') as f:
+            json.dump(data, f, indent=2)
+        os.replace(temp_path, filepath)
+        return True
+    except (IOError, OSError) as e:
+        logger.error("Failed to write JSON to %s: %s", filepath, e)
+        return False
+
+
+def mask_secret_value(value: Any) -> str:
+    """
+    Mask a secret value for safe display.
+    Shows **** followed by last 4 characters for strings > 4 chars.
+    """
+    if value is None:
+        return "<None>"
+    if isinstance(value, (dict, list)):
+        return "<complex>"
+    str_val = str(value)
+    if len(str_val) <= 4:
+        return "****"
+    return f"****{str_val[-4:]}"
+
+
+def is_cache_fresh(timestamp: float) -> bool:
+    """
+    Check if a cache entry is still fresh based on TTL.
+    """
+    return (time.time() - timestamp) < CACHE_TTL_SECONDS
+
+
+def clear_secrets_cache(sname: str = "tenx/env/vars") -> Dict[str, Any]:
+    """
+    Clear both memory and file cache for a given secret name.
+    Returns status dict with what was cleared.
+    """
+    result = {"memory_cleared": False, "file_cleared": False, "file_path": None}
+    
+    # Clear memory cache
+    with _cache_lock:
+        if sname in _secrets_cache:
+            del _secrets_cache[sname]
+            result["memory_cleared"] = True
+    
+    # Clear file cache
+    cache_file = get_secrets_cache_filename(sname)
+    result["file_path"] = cache_file
+    if os.path.exists(cache_file):
+        try:
+            os.remove(cache_file)
+            result["file_cleared"] = True
+        except OSError as e:
+            logger.error("Failed to remove cache file %s: %s", cache_file, e)
+    
+    logger.info(f"Cleared cache for {sname}: {result}")
+    return result
+
+
+def get_all_secrets(sname: str = "tenx/env/vars") -> Dict[str, Any]:
+    """
+    Get all secrets from cache (memory -> file -> AWS), updating caches as needed.
+    
+    Priority:
+    1. Memory cache (if fresh)
+    2. File cache (if fresh, also populates memory)
+    3. AWS Secrets Manager (populates both caches)
+    """
+    # 1. Check memory cache
+    with _cache_lock:
+        if sname in _secrets_cache:
+            entry = _secrets_cache[sname]
+            if is_cache_fresh(entry["timestamp"]):
+                logger.debug(f"Returning {sname} from memory cache")
+                return entry["data"]
+    
+    # 2. Check file cache
+    cache_file = get_secrets_cache_filename(sname)
+    cached_data = safe_read_json(cache_file)
+    if cached_data:
+        file_mtime = os.path.getmtime(cache_file)
+        if is_cache_fresh(file_mtime):
+            logger.info(f"Loading {sname} from file cache: {cache_file}")
+            with _cache_lock:
+                _secrets_cache[sname] = {"data": cached_data, "timestamp": file_mtime}
+            return cached_data
+    
+    # 3. Fetch from AWS
+    logger.info(f"Fetching {sname} from AWS Secrets Manager")
+    try:
+        raw_secret = get_ssm_secret(sname)
+        if isinstance(raw_secret, str):
+            secrets_data = json.loads(raw_secret)
+        else:
+            secrets_data = raw_secret
+        
+        # Update both caches
+        current_time = time.time()
+        with _cache_lock:
+            _secrets_cache[sname] = {"data": secrets_data, "timestamp": current_time}
+        atomic_write_json(cache_file, secrets_data)
+        
+        return secrets_data
+    except Exception as e:
+        logger.error(f"Failed to fetch {sname} from AWS: {e}")
+        raise
+
+
+def force_refresh_secrets(sname: str = "tenx/env/vars") -> Dict[str, Any]:
+    """
+    Force refresh secrets by clearing cache and fetching fresh from AWS.
+
+    Args:
+        sname: secret name to refresh
+
+    Returns the refreshed secrets dict.
+    """
+    # Clear existing cache
+    clear_secrets_cache(sname)
+    
+    # Fetch fresh
+    secrets = get_all_secrets(sname)
+    
+    logger.info(f"Refreshed {len(secrets)} secrets from {sname}")
+    return secrets
+
+
+def get_cache_metadata(sname: str = "tenx/env/vars") -> Dict[str, Any]:
+    """
+    Get metadata about the cache for a given secret name.
+    """
+    result = {
+        "secret_name": sname,
+        "memory_cache": {"exists": False, "age_seconds": None, "is_fresh": False, "key_count": 0},
+        "file_cache": {"exists": False, "path": None, "age_seconds": None, "is_fresh": False, "key_count": 0}
+    }
+    
+    # Check memory cache
+    with _cache_lock:
+        if sname in _secrets_cache:
+            entry = _secrets_cache[sname]
+            age = time.time() - entry["timestamp"]
+            result["memory_cache"] = {
+                "exists": True,
+                "age_seconds": round(age, 2),
+                "is_fresh": is_cache_fresh(entry["timestamp"]),
+                "key_count": len(entry["data"]) if isinstance(entry["data"], dict) else 0
+            }
+    
+    # Check file cache
+    cache_file = get_secrets_cache_filename(sname)
+    result["file_cache"]["path"] = cache_file
+    if os.path.exists(cache_file):
+        file_mtime = os.path.getmtime(cache_file)
+        age = time.time() - file_mtime
+        cached_data = safe_read_json(cache_file)
+        result["file_cache"] = {
+            "exists": True,
+            "path": cache_file,
+            "age_seconds": round(age, 2),
+            "is_fresh": is_cache_fresh(file_mtime),
+            "key_count": len(cached_data) if isinstance(cached_data, dict) else 0
+        }
+    
+    result["ttl_seconds"] = CACHE_TTL_SECONDS
+    return result
+
+
+def clear_api_key_cache():
+    """
+    Clear the lru_cache for get_api_key in api.core.security.
+    Call this after refreshing secrets to ensure API key changes take effect.
+    """
+    try:
+        from api.core.security import get_api_key
+        get_api_key.cache_clear()
+        logger.info("Cleared get_api_key lru_cache")
+        return True
+    except Exception as e:
+        logger.warning(f"Could not clear get_api_key cache: {e}")
+        return False
 
 def init_aws_session():
     # Create a Secrets Manager client
@@ -168,130 +398,94 @@ def lambda_friendly_path(fpath):
     return f
 
 
-def get_auth(ssmkey=None, envvar=None, fconfig=None, rfile=False):
-    '''
-    Wrapper to get auth from ssm, env or file
+def get_auth(ssmkey=None, envvar=None, fconfig=None, rfile=False, write_to_path=None):
+    """
+    Wrapper to get auth from env, .envdir cache, or SSM.
 
-    ssmkey: secret manager key
-    envvar: environment variable name
-    fconfig: file name
-    rfile: return file object
-
-    '''
-    caller_line_number = sys._getframe(1).f_lineno        
+    Order:
+    1) envvar override (if provided and set)
+    2) tenx/env/vars from .envdir cache (via get_all_secrets), then lookup ssmkey within it
+    3) direct SSM fetch for ssmkey
+    """
+    caller_line_number = sys._getframe(1).f_lineno
     caller_filename = sys._getframe(1).f_code.co_filename
-    caller_filename = caller_filename.split('/')[-1] if '/' in caller_filename else caller_filename      
-    caller_func_name = sys._getframe(1).f_code.co_name    
-    print(f'{caller_filename}:{caller_func_name}:{caller_line_number}: get_auth(ssmkey={ssmkey}, envvar={envvar}, fconfig={fconfig})')
+    caller_filename = caller_filename.split('/')[-1] if '/' in caller_filename else caller_filename
+    caller_func_name = sys._getframe(1).f_code.co_name
+    print(f'{caller_filename}:{caller_func_name}:{caller_line_number}: get_auth(ssmkey={ssmkey}, envvar={envvar})')
 
-    if not fconfig:
-        fconfig = '.env/auth_{ssmkey}.json'
-
-    #if in lambda write only in /tmp folder    
-    fconfig = lambda_friendly_path(fconfig)
-        
-    #pass through multiple alternatives to get credential
-    if fconfig:                    
-        if os.path.exists(fconfig):
+    # 1) Environment variable override
+    if envvar:
+        val = os.environ.get(envvar, '')
+        if val not in ['', 'null', 'None']:
             try:
-                print(f'reading auth from file: {fconfig} ..')        
-                with open(fconfig) as json_file:
-                    auth = json.load(json_file)
-                return auth
-            except:
-                print(f'reading {fconfig} failed!')
-
-    if envvar:            
-        if os.environ.get(envvar,'') not in ['','null','None']: 
-            try:
-                print(f'Getting {envvar} from environment ..')
-                auth = config_from_string(os.environ.get(envvar,''),fname=fconfig, rfile=rfile)
-                #print('auth from env is:',auth)
-                return auth
-            except:
+                return config_from_string(val)
+            except Exception:
                 print(f'getting env variable {envvar} failed!')
-                
+
+    # 2) Try from tenx/env/vars cache in .envdir
+    try:
+        secrets_bundle = get_all_secrets("tenx/env/vars")
+        if ssmkey:
+            # direct hit in bundle
+            if ssmkey in secrets_bundle:
+                return secrets_bundle[ssmkey]
+            # mapping support
+            keys_map = {
+                'strapi/alml-cms/token': 'ALML_STRAPI_TOKEN',
+                'staging/strapi/token': 'TENX_STAGING_STRAPI_TOKEN',
+                'dev/strapi/token': 'TENX_DEV_STRAPI_TOKEN',
+                'prod/strapi/token': 'TENX_PROD_STRAPI_TOKEN',
+                'git_token_tenx': 'GIT_TOKEN_10ACADEMY',
+                'tenx/db/strapi': {
+                    'STRAPI_PGDB_USERNAME': 'username',
+                    'STRAPI_PGDB_PASSWORD': 'password',
+                    'STRAPI_PGDB_ENGINE': 'engine',
+                    'STRAPI_PGDB_HOST': 'host',
+                    'STRAPI_PGDB_PORT': 'port',
+                    'STRAPI_PGDB_IDENTIFIER': 'dbInstanceIdentifier'
+                },
+                'strapi/prod/email': [
+                    'AWS_SES_KEY',
+                    'AWS_SES_SECRET'
+                ]
+            }
+            if ssmkey in keys_map:
+                res = keys_map[ssmkey]
+                if isinstance(res, dict):
+                    auth = {}
+                    for kold, knew in res.items():
+                        auth[knew] = secrets_bundle[kold]
+                    return auth
+                if isinstance(res, list):
+                    auth = {}
+                    for k in res:
+                        auth[k] = secrets_bundle[k]
+                    return auth
+                return secrets_bundle[res]
+    except Exception:
+        logger.error("Failed to fetch secrets from tenx/env/vars cache. Defaulting to SSM.")
+        pass
+
+    # 3) Fallback: direct SSM for ssmkey
     if ssmkey:
-        
-        try: 
-
-            keys = {
-                    'strapi/alml-cms/token':'ALML_STRAPI_TOKEN',
-                    'staging/strapi/token':'TENX_STAGING_STRAPI_TOKEN',
-                    'dev/strapi/token':'TENX_DEV_STRAPI_TOKEN',
-                    'prod/strapi/token':'TENX_PROD_STRAPI_TOKEN',
-                    'git_token_tenx':'GIT_TOKEN_10ACADEMY',
-                    'tenx/db/strapi': {
-                                        'STRAPI_PGDB_USERNAME':'username',
-                                        'STRAPI_PGDB_PASSWORD':'password',
-                                        'STRAPI_PGDB_ENGINE':'engine',
-                                        'STRAPI_PGDB_HOST':'host',
-                                        'STRAPI_PGDB_PORT':'port',
-                                        'STRAPI_PGDB_IDENTIFIER':'dbInstanceIdentifier'
-                    },
-                    'strapi/prod/email':[
-                                            'AWS_SES_KEY',
-                                            'AWS_SES_SECRET'
-                    ]
-                   }
-
-            # by default try to get all requested from tenx/env/vars
-            sname = 'tenx/env/vars'
-            rname = lambda_friendly_path('.env/tenx_env_vars.json')
-                                         
-            if not os.path.exists(rname):
-                print(f'Getting {sname} from aws secret manager ..')
-                authTemp = get_secret_env(sname)
-                _ = config_from_string(authTemp,fname=rname,rfile=True)
-            else:
-                print(f'Getting {sname} from existing file {rname}..')
-                with open(rname) as json_file:
-                    authTemp = json.load(json_file)
-
-
-            if ssmkey in keys.keys() or ssmkey in authTemp.keys():
-                if ssmkey in authTemp.keys():
-                    auth = authTemp[ssmkey]
-                else:
-                    res = keys[ssmkey]
-
-                    if type(res) is dict:
-                        #res is dict
-                        auth = {}
-                        for kold,knew in res.items():
-                            auth[knew] = authTemp[kold]
-                    elif type(res) is list:
-                        #res is list
-                        auth = {}
-                        for k in res:
-                            auth[k] = authTemp[k]
-                    else:
-                        #res is string
-                        auth = authTemp[res]
-            else:
-                print(f'Getting {ssmkey} from aws secret manager as it can not be found in {sname} ..')
-                auth = get_secret(ssmkey,fname=fconfig)   
-
-            if rfile:
-                if os.path.exists(fconfig):
-                    print(f'Returning {fconfig} from existing file ..')
-                    return fconfig
-                else:
-                    print(f'Returning {fconfig} by writing to file ..')
-                    return config_from_string(auth,fname=fconfig,rfile=rfile)   
-            else:             
-                return auth
-            
-        except Exception as e:
-            print(f'getting secret {ssmkey} from aws ssm failed! ')
-            #print(e)
+        try:
+            auth = get_secret(ssmkey)
+            # Optionally write to file for consumers that expect a path (e.g., gdrive)
+            target_path = write_to_path or fconfig
+            if target_path and isinstance(auth, (dict, list, str)):
+                try:
+                    # Ensure directory exists
+                    os.makedirs(os.path.dirname(os.path.expanduser(target_path)) or ".", exist_ok=True)
+                    with open(os.path.expanduser(target_path), "w") as f:
+                        json.dump(auth, f, indent=2) if isinstance(auth, (dict, list)) else f.write(str(auth))
+                except Exception as e:
+                    logger.error(f'writing auth to {target_path} failed: {e}')
+            return auth
+        except Exception:
+            logger.error(f'getting secret {ssmkey} from aws ssm failed!')
             raise
 
-    print('Crediential can not be obtained. Params are')
-    print(f'ssmkey={ssmkey}, envvar={envvar}, fconfig={fconfig}')           
-    raise
-
-    return {}
+    raise ValueError(f'Credential cannot be obtained. ssmkey={ssmkey}, envvar={envvar}')
 
 def get_google_service_account(ssmkey="gspread/config",
                                 envvar="gclass_credentials.json",
@@ -316,14 +510,13 @@ if __name__ == "__main__":
     path = os.path.dirname(os.path.realpath(__file__))
     path = os.path.dirname(path)
 
-    # dbauth = get_auth(ssmkey='tenx/db/pjmatch',
-    #                   envvar='RDS_CONFIG',
-    #                   fconfig=f'{path}/.env/dbconfig.json')
-    # print('**Getting config files from ssm if they it is not already in .env folder ..')
-    # print('=====================================')
-    print(path)
-    _ = get_auth(ssmkey="tenx/env/vars",
-                 fconfig=f'{path}/.env/tenx_env_vars.json',
-                 envvar='all_tenx_env_vars',
-                 )
-    print(_)
+    print(f"Testing secret retrieval from {path}")
+    print(f"Cache directory: {ENVDIR}")
+    
+    # Test get_all_secrets (uses .envdir cache)
+    secrets = get_all_secrets("tenx/env/vars")
+    print(f"Retrieved {len(secrets)} secrets")
+    
+    # Test get_auth
+    _ = get_auth(ssmkey="tenx/env/vars", envvar='all_tenx_env_vars')
+    print(f"get_auth returned {len(_) if isinstance(_, dict) else 'non-dict'} items")

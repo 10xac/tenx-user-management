@@ -3,6 +3,7 @@ import os, sys
 import pickle
 import os.path
 import json
+from utils.secret import ENVDIR
 
 
 import numpy as np
@@ -80,14 +81,12 @@ class google_api():
         if fauth is None:
             fauth = 'gclass_credentials.json'
 
-        if os.path.exists(f'~/.env/{fauth}'):
-            path = '~/.env'
-        else:
-            path = os.path.join(self.HOME, '.credentials')
-            
-        self.fauth = os.path.join(path, fauth)            
+        # use .envdir for credentials to align with new cache approach
+        path = os.path.expanduser(ENVDIR)
+        os.makedirs(path, exist_ok=True)
+        self.fauth = os.path.join(path, fauth)
 
-        self.token_file = os.path.join(path, 'gtoken',token_file)
+        self.token_file = os.path.join(path, 'gtoken', token_file)
         #print('token file',self.token_file)
         
         if self.verbose>1:
@@ -95,10 +94,9 @@ class google_api():
             print(f'token_file={self.token_file}')
 
         if not os.path.exists(self.fauth):
-            self.fauth = '~/.env/gclass_credentials.json'
             auth = get_auth(ssmkey='gspread/config',
                             envvar='GSPREAD_CONFIG',
-                            fconfig=self.fauth)
+                            write_to_path=self.fauth)
         else:
             auth = json.load(open(self.fauth,'r'))
        

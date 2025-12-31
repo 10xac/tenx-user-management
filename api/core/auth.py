@@ -44,12 +44,13 @@ async def get_current_user(
     try:
         if "multipart/form-data" in content_type:
             form_data = await request.form()
-            run_stage = form_data.get("run_stage")
+            run_stage = form_data.get("run_stage") or form_data.get("config[run_stage]")
         else:
             # For JSON and other content types
             json_data = await request.json()
-            run_stage = json_data.get("config", {}).get("run_stage")
-    except:
+            run_stage = json_data.get("config", {}).get("run_stage") or json_data.get("run_stage")
+    except Exception as e:
+        logger.warning(f"Failed to extract run_stage from request: {str(e)}. Defaulting to 'dev'.")
         run_stage = "dev"  # Default to dev if can't get from request
     
     sg = StrapiGraphql(run_stage=run_stage)
