@@ -267,7 +267,8 @@ class BatchService:
                 delimiter=self.config.delimiter,
                 encoding=self.config.encoding
             )
-            
+            df.columns = df.columns.str.strip()
+
             # Validate required columns
             required_columns = {'name', 'email'}
             missing = required_columns - set(df.columns)
