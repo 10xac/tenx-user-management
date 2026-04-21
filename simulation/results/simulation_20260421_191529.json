@@ -1,0 +1,140 @@
+{
+  "metadata": {
+    "run_id": "20260421_191529",
+    "base_url": "http://localhost:8001",
+    "run_stage": "simulation",
+    "timestamp": "2026-04-21T19:15:29.224224",
+    "tiers": [
+      10
+    ],
+    "endpoints": [
+      "single"
+    ],
+    "has_auth_token": false,
+    "dry_run": false
+  },
+  "summary": {
+    "total_endpoint_tier_combos": 1,
+    "total_requests": 10,
+    "total_successful": 10,
+    "total_failed": 0,
+    "overall_error_rate_pct": 0.0,
+    "overall_latency_ms": {
+      "min": 6008.7,
+      "max": 12088.57,
+      "mean": 11297.71,
+      "median": 11852.27,
+      "p95": 12088.57,
+      "p99": 12088.57
+    }
+  },
+  "results": [
+    {
+      "endpoint": "single",
+      "tier": 10,
+      "concurrency": 2,
+      "total_requests": 10,
+      "successful": 10,
+      "failed": 0,
+      "error_rate_pct": 0.0,
+      "status_distribution": {
+        "200": 10
+      },
+      "latency_ms": {
+        "min": 6008.7,
+        "max": 12088.57,
+        "mean": 11297.71,
+        "median": 11852.27,
+        "p95": 12088.57,
+        "p99": 12088.57,
+        "stdev": 1862.9
+      },
+      "throughput_rps": 0.17,
+      "wall_clock_sec": 59.42,
+      "start_time": "2026-04-21T19:15:29.224561",
+      "end_time": "2026-04-21T19:16:28.645877",
+      "requests": [
+        {
+          "user_index": 0,
+          "status_code": 200,
+          "elapsed_ms": 6008.7,
+          "success": true,
+          "error": null,
+          "response_preview": "{\"success\": true, \"message\": \"Trainee created successfully\", \"data\": {\"alluser_id\": \"385\", \"profile\": {\"data\": {\"createProfileInformation\": {\"data\": {\"id\": \"86\"}}}}, \"trainee\": {\"data\": {\"id\": 87, \"attributes\": {\"email\": \"sim.nathan.demeke.wq330@sim.10academy.org\", \"createdAt\": \"2026-04-21T16:15:35...."
+        },
+        {
+          "user_index": 1,
+          "status_code": 200,
+          "elapsed_ms": 11909.39,
+          "success": true,
+          "error": null,
+          "response_preview": "{\"success\": true, \"message\": \"Trainee created successfully\", \"data\": {\"alluser_id\": \"386\", \"profile\": {\"data\": {\"createProfileInformation\": {\"data\": {\"id\": \"87\"}}}}, \"trainee\": {\"data\": {\"id\": 88, \"attributes\": {\"email\": \"sim.mohammed.dagnew.2nvb1@sim.10academy.org\", \"createdAt\": \"2026-04-21T16:15:4..."
+        },
+        {
+          "user_index": 2,
+          "status_code": 200,
+          "elapsed_ms": 11753.32,
+          "success": true,
+          "error": null,
+          "response_preview": "{\"success\": true, \"message\": \"Trainee created successfully\", \"data\": {\"alluser_id\": \"387\", \"profile\": {\"data\": {\"createProfileInformation\": {\"data\": {\"id\": \"88\"}}}}, \"trainee\": {\"data\": {\"id\": 89, \"attributes\": {\"email\": \"sim.noah.mekonnen.vehp2@sim.10academy.org\", \"createdAt\": \"2026-04-21T16:15:47...."
+        },
+        {
+          "user_index": 3,
+          "status_code": 200,
+          "elapsed_ms": 11723.91,
+          "success": true,
+          "error": null,
+          "response_preview": "{\"success\": true, \"message\": \"Trainee created successfully\", \"data\": {\"alluser_id\": \"388\", \"profile\": {\"data\": {\"createProfileInformation\": {\"data\": {\"id\": \"89\"}}}}, \"trainee\": {\"data\": {\"id\": 90, \"attributes\": {\"email\": \"sim.jasmine.tilahun.go0e3@sim.10academy.org\", \"createdAt\": \"2026-04-21T16:15:5..."
+        },
+        {
+          "user_index": 4,
+          "status_code": 200,
+          "elapsed_ms": 11795.16,
+          "success": true,
+          "error": null,
+          "response_preview": "{\"success\": true, \"message\": \"Trainee created successfully\", \"data\": {\"alluser_id\": \"389\", \"profile\": {\"data\": {\"createProfileInformation\": {\"data\": {\"id\": \"90\"}}}}, \"trainee\": {\"data\": {\"id\": 91, \"attributes\": {\"email\": \"sim.chloe.solomon.mkcy4@sim.10academy.org\", \"createdAt\": \"2026-04-21T16:15:59...."
+        },
+        {
+          "user_index": 5,
+          "status_code": 200,
+          "elapsed_ms": 12088.57,
+          "success": true,
+          "error": null,
+          "response_preview": "{\"success\": true, \"message\": \"Trainee created successfully\", \"data\": {\"alluser_id\": \"390\", \"profile\": {\"data\": {\"createProfileInformation\": {\"data\": {\"id\": \"91\"}}}}, \"trainee\": {\"data\": {\"id\": 92, \"attributes\": {\"email\": \"sim.abigail.bekele.ri2u5@sim.10academy.org\", \"createdAt\": \"2026-04-21T16:16:05..."
+        },
+        {
+          "user_index": 6,
+          "status_code": 200,
+          "elapsed_ms": 12070.72,
+          "success": true,
+          "error": null,
+          "response_preview": "{\"success\": true, \"message\": \"Trainee created successfully\", \"data\": {\"alluser_id\": \"391\", \"profile\": {\"data\": {\"createProfileInformation\": {\"data\": {\"id\": \"92\"}}}}, \"trainee\": {\"data\": {\"id\": 93, \"attributes\": {\"email\": \"sim.liya.gebre.79mp6@sim.10academy.org\", \"createdAt\": \"2026-04-21T16:16:11.543..."
+        },
+        {
+          "user_index": 7,
+          "status_code": 200,
+          "elapsed_ms": 11750.64,
+          "success": true,
+          "error": null,
+          "response_preview": "{\"success\": true, \"message\": \"Trainee created successfully\", \"data\": {\"alluser_id\": \"392\", \"profile\": {\"data\": {\"createProfileInformation\": {\"data\": {\"id\": \"93\"}}}}, \"trainee\": {\"data\": {\"id\": 94, \"attributes\": {\"email\": \"sim.peter.wolde.v1o47@sim.10academy.org\", \"createdAt\": \"2026-04-21T16:16:17.38..."
+        },
+        {
+          "user_index": 8,
+          "status_code": 200,
+          "elapsed_ms": 11930.17,
+          "success": true,
+          "error": null,
+          "response_preview": "{\"success\": true, \"message\": \"Trainee created successfully\", \"data\": {\"alluser_id\": \"393\", \"profile\": {\"data\": {\"createProfileInformation\": {\"data\": {\"id\": \"94\"}}}}, \"trainee\": {\"data\": {\"id\": 95, \"attributes\": {\"email\": \"sim.peter.zewde.thcx8@sim.10academy.org\", \"createdAt\": \"2026-04-21T16:16:23.47..."
+        },
+        {
+          "user_index": 9,
+          "status_code": 200,
+          "elapsed_ms": 11946.49,
+          "success": true,
+          "error": null,
+          "response_preview": "{\"success\": true, \"message\": \"Trainee created successfully\", \"data\": {\"alluser_id\": \"394\", \"profile\": {\"data\": {\"createProfileInformation\": {\"data\": {\"id\": \"95\"}}}}, \"trainee\": {\"data\": {\"id\": 96, \"attributes\": {\"email\": \"sim.haile.mengistu.hl519@sim.10academy.org\", \"createdAt\": \"2026-04-21T16:16:29..."
+        }
+      ]
+    }
+  ]
+}
