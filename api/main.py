@@ -24,7 +24,7 @@ ADDITIONAL_ALLOWED_ORIGINS: List[str] = [
 # Configure CORS with regex pattern to allow any subdomain of specified domains
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://([\w\-]+\.)*?(10academy\.org|gettenacious\.com)(:\d+)?$",
+    allow_origin_regex=r"^https?://([\w\-]+\.)*?(10academy\.org|gettenacious\.com|carisurg\.com)(:\d+)?$",
     allow_origins=ADDITIONAL_ALLOWED_ORIGINS,  # Explicit localhost origins
     allow_credentials=True,
     allow_methods=["*"],
