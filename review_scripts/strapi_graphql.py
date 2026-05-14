@@ -99,8 +99,8 @@ class StrapiGraphql():
                 # result_json= json.dumps(r, indent=2)
                 
             else:
-                raise Exception("Query failed to run by returning code of {}. {}".format(
-                        request.status_code, query))
+                raise Exception("Query failed to run by returning code of {}. Response: {}. Query: {}".format(
+                        request.status_code, request.text, query))
             
             return r
         else:
@@ -110,8 +110,8 @@ class StrapiGraphql():
                 # result_json= json.dumps(r, indent=2)
                 
             else:
-                raise Exception("Query failed to run by returning code of {}. {}".format(
-                        request.status_code, query))
+                raise Exception("Query failed to run by returning code of {}. Response: {}. Query: {}".format(
+                        request.status_code, request.text, query))
             
             return r
         
