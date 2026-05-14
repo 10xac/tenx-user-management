@@ -157,7 +157,7 @@ class CommunicationManager:
             mutation createTraineeBatchAccess(
                 $traineeID: ID
                 $batchID: ID
-                $status: Enum_Traineebatchaccess_Status
+                $status: ENUM_TRAINEEBATCHACCESS_STATUS
                 $hasTenx: Boolean
                 $hasLeap: Boolean
             ) {
@@ -193,7 +193,7 @@ class CommunicationManager:
         query = """
             mutation updateTraineeBatchAccess(
                 $id: ID!
-                $status: Enum_Traineebatchaccess_Status
+                $status: ENUM_TRAINEEBATCHACCESS_STATUS
                 $hasTenx: Boolean
             ) {
                 updateTraineeBatchAccess(
