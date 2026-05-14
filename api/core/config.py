@@ -41,6 +41,12 @@ def get_strapi_params(stage):
     if stage.lower().startswith('devapply'):
         root='dev-apply-cms'
         ssmkey="APPLY_DEV_STRAPI_TOKEN"
+    elif stage.lower().startswith('carisurgapply'):
+        root='apply-carisurg-cms'
+        ssmkey="CARISURG_APPLY_PROD_STRAPI_TOKEN"
+    elif stage.lower().startswith('carisurg'):
+        root='carisurg-cms'
+        ssmkey="CARISURG_PROD_STRAPI_TOKEN"
     elif stage.lower().startswith('apply'):
         root='apply-cms'
         ssmkey="APPLY_PROD_STRAPI_TOKEN" 
