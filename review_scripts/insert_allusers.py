@@ -398,7 +398,12 @@ class InsertAllUsers:
             query = """ query getReviewer($batch: Int) {
                     reviewers(
                         pagination: { start: 0, limit: 100 }
-                        filters: { batches: { Batch: { eq: $batch } } }
+                        filters: {
+                            reviewer_batch_accesses: {
+                                batch: { Batch: { eq: $batch } }
+                                hasTenx: { eq: true }
+                            }
+                        }
                     ) {
                         data {
                         id
@@ -826,7 +831,12 @@ class InsertAllUsers:
             query getReviewer($batch: Int) {
                     reviewers(
                         pagination: { start: 0, limit: 100 }
-                        filters: { batches: { Batch: { eq: $batch } } }
+                        filters: {
+                            reviewer_batch_accesses: {
+                                batch: { Batch: { eq: $batch } }
+                                hasTenx: { eq: true }
+                            }
+                        }
                     ) {
                         data {
                         id

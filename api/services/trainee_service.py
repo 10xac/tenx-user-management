@@ -27,8 +27,73 @@ class TraineeService:
             'user_id': None,
             'alluser_id': None,
             'profile_id': None,
-            'trainee_id': None
+            'trainee_id': None,
+            'trainee_batch_access_id': None
         }
+
+    def _get_existing_trainee(self, email: str) -> Dict[str, Any]:
+        """Return an existing trainee record for this email, if one exists."""
+        result = self.cm.read_trainee_by_email(self.sg, email)
+        trainees = result.get("data", {}).get("trainees", {}).get("data", [])
+        return trainees[0] if trainees else {}
+
+    def _ensure_trainee_batch_access(self, trainee_id: str, batch_id: str, status: str = "Accepted") -> Dict:
+        """Create or refresh the trainee's access for the selected batch."""
+        if not batch_id:
+            return TraineeResponse.error_response(
+                error_type="TRAINEE_BATCH_ACCESS_ERROR",
+                error_message="Trainee batch access is required but no batch id was provided",
+                error_location="trainee_batch_access",
+                error_data={
+                    "trainee_id": trainee_id,
+                    "batch_id": batch_id,
+                    "status": status
+                }
+            )
+
+        result = self.cm.ensure_trainee_batch_access(
+            self.sg,
+            trainee_id=trainee_id,
+            batch_id=batch_id,
+            status=status or "Accepted",
+            has_tenx=True,
+            has_leap=False
+        )
+
+        if isinstance(result, dict) and result.get("errors"):
+            return TraineeResponse.error_response(
+                error_type="TRAINEE_BATCH_ACCESS_ERROR",
+                error_message=str(result.get("errors")),
+                error_location="trainee_batch_access",
+                error_data={
+                    "trainee_id": trainee_id,
+                    "batch_id": batch_id,
+                    "status": status
+                }
+            )
+
+        access_id = (
+            result.get("data", {})
+            .get("createTraineeBatchAccess", result.get("data", {}).get("updateTraineeBatchAccess", {}))
+            .get("data", {})
+            .get("id")
+        )
+        if access_id:
+            self.created_resources['trainee_batch_access_id'] = access_id
+        else:
+            return TraineeResponse.error_response(
+                error_type="TRAINEE_BATCH_ACCESS_ERROR",
+                error_message="Trainee batch access could not be created or confirmed",
+                error_location="trainee_batch_access",
+                error_data={
+                    "trainee_id": trainee_id,
+                    "batch_id": batch_id,
+                    "status": status,
+                    "access_result": result
+                }
+            )
+
+        return result
 
     def _cleanup_resources(self, error_step: str):
         """Clean up created resources if an error occurs"""
@@ -199,8 +264,9 @@ class TraineeService:
         """Insert trainee information"""
         try:
             result = self.sm.insert_data(trainee_data, "trainees")
-            if result and 'id' in result:
-                self.created_resources['trainee_id'] = result['id']
+            trainee_id = result.get('id') or result.get('data', {}).get('id') if result else None
+            if trainee_id:
+                self.created_resources['trainee_id'] = trainee_id
             return result
         except Exception as e:
             self._cleanup_resources('trainee')
@@ -219,8 +285,62 @@ class TraineeService:
             print("trainee data ", self.trainee_data)
             processed_data = self.data_processor.process_single_trainee(self.trainee_data)
             processed_data['is_mock'] = self.config.is_mock
-            processed_data['batch_id'] = self.config.batch if self.config.batch else []
+            processed_data['batch_id'] = self.config.batch if self.config.batch else ""
             processed_data['groups'] = self.config.group_id if self.config.group_id else []
+            batch_id = processed_data['batch_id']
+
+            existing_trainee = self._get_existing_trainee(processed_data['email'])
+            if existing_trainee:
+                trainee_id = existing_trainee.get("id")
+                if not trainee_id:
+                    return TraineeResponse.error_response(
+                        error_type="TRAINEE_LOOKUP_ERROR",
+                        error_message="Existing trainee record is missing an id",
+                        error_location="trainee_lookup",
+                        error_data={"email": processed_data['email']}
+                    )
+
+                alluser_id = (
+                    existing_trainee
+                    .get("attributes", {})
+                    .get("all_user", {})
+                    .get("data", {})
+                    .get("id")
+                )
+
+                access_result = self._ensure_trainee_batch_access(
+                    trainee_id,
+                    batch_id,
+                    processed_data.get('status', 'Accepted')
+                )
+                if isinstance(access_result, dict) and access_result.get('error'):
+                    return access_result
+
+                alluser_access_result = self.cm.ensure_all_user_batch_group(
+                    self.sg,
+                    alluser_id,
+                    batch_id=batch_id,
+                    group_id=self.config.group_id
+                )
+                if isinstance(alluser_access_result, dict) and alluser_access_result.get('error'):
+                    return TraineeResponse.error_response(
+                        error_type=alluser_access_result.get("error_type", "ALL_USER_BATCH_GROUP_ERROR"),
+                        error_message=alluser_access_result.get("message", "Failed to update AllUser batch/group relations"),
+                        error_location="all_user_batch_group",
+                        error_data=alluser_access_result
+                    )
+
+                return TraineeResponse.success_response(
+                    message="Existing trainee batch access updated successfully",
+                    data={
+                        "alluser_id": alluser_id,
+                        "trainee": existing_trainee,
+                        "trainee_batch_access": access_result,
+                        "all_user_access": alluser_access_result,
+                        "existing_trainee": True
+                    }
+                )
+
             # Split name into first and last name
             name_parts = processed_data['name'].split()
             first_name = name_parts[0]
@@ -231,7 +351,7 @@ class TraineeService:
                 "name": processed_data['name'],
                 "email": processed_data['email'],
                 "role": processed_data['role'],
-                "batch_id": processed_data['batch_id'],
+                "batch_id": [batch_id] if batch_id else [],
                 "groups": processed_data['groups'],
                 "password": processed_data['password'],
                 "is_mock": processed_data['is_mock']
@@ -269,19 +389,38 @@ class TraineeService:
                 "email": processed_data['email'],
                 "trainee_id": str(uuid.uuid4()),
                 "Status": processed_data.get('status', 'Accepted'),
-                "batch": processed_data['batch_id'],
+                "batch": batch_id,
                 "all_user": alluser_id
             }
             trainee_result = self._insert_trainee(trainee_data)
             if isinstance(trainee_result, dict) and 'error' in trainee_result:
                 return trainee_result
 
+            trainee_id = trainee_result.get('id') or trainee_result.get('data', {}).get('id')
+            if not trainee_id:
+                return TraineeResponse.error_response(
+                    error_type="TRAINEE_CREATION_ERROR",
+                    error_message="Trainee was created without a returned id",
+                    error_location="trainee_creation",
+                    error_data=trainee_result
+                )
+
+            access_result = self._ensure_trainee_batch_access(
+                trainee_id,
+                batch_id,
+                processed_data.get('status', 'Accepted')
+            )
+            if isinstance(access_result, dict) and access_result.get('error'):
+                self._cleanup_resources('trainee')
+                return access_result
+
             return TraineeResponse.success_response(
                 message="Trainee created successfully",
                 data={
                     "alluser_id": alluser_id,
-                "profile": profile_result,
-                "trainee": trainee_result
+                    "profile": profile_result,
+                    "trainee": trainee_result,
+                    "trainee_batch_access": access_result
                 }
             )
             
@@ -292,4 +431,3 @@ class TraineeService:
                 error_location="trainee_creation",
                 error_data={"traceback": traceback.format_exc()}
             )
-   
