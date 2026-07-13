@@ -21,7 +21,7 @@ RUN chmod +x start.sh
 RUN pip install --no-cache-dir -r api/requirements.txt
 
 # Expose port
-EXPOSE 8000
+EXPOSE 8120
 
 # Run the application
 CMD ["./start.sh"] 

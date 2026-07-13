@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Production startup script (used in Docker)
-export PORT=${PORT:-8000}
+export PORT=${PORT:-8120}
 export HOST=${HOST:-"0.0.0.0"}
 export WORKERS=${WORKERS:-4}
 

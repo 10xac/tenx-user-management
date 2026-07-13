@@ -40,4 +40,4 @@ app.include_router(env_routes.router)
 if __name__ == "__main__":
     import uvicorn
     # uvicorn.run("api.main:app", host="0.0.0.0", port=8113, reload=True) 
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    uvicorn.run(app, host="0.0.0.0", port=8120) 
