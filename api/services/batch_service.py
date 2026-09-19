@@ -143,12 +143,31 @@ class BatchService:
                     if result.get('status') == 'Success':
                         successful.append(result)
                     else:
+                        # Never invent "already exists". That default was what
+                        # batch 69's admin was told about 17 rows that had
+                        # nothing wrong with them - Strapi had refused the write
+                        # under load, and the one message the report carried
+                        # pointed at the data instead of the deployment. If the
+                        # layers below could not say why, say THAT.
+                        reason = (
+                            result.get('error_message')
+                            or (result.get('error') or {}).get('error_message')
+                            or (result.get('error') or {}).get('message')
+                            or 'No reason was reported by the trainee service'
+                        )
+                        self.logger.error("Trainee row failed", extra={
+                            'row': index + 1,
+                            'email': row.get('email', 'Unknown'),
+                            'batch': self.config.batch,
+                            'error_type': result.get('error_type', 'PROCESSING_ERROR'),
+                            'error': reason,
+                        })
                         failed.append({
                             'name': row.get('name', 'Unknown'),
                             'email': row.get('email', 'Unknown'),
                             'status': 'Failed',
                             'error_type': result.get('error_type', 'PROCESSING_ERROR'),
-                            'error_message': result.get('error_message', 'Email or Username already exists')
+                            'error_message': reason
                         })
                 except Exception as e:
                     self.logger.error("Error processing trainee record", extra={
