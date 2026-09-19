@@ -135,12 +135,37 @@ async def process_batch(
                 error_data={"batch_create_error": str(batch_create_error)}
             )
         
-        # Create service instance and add background task
+        # Create service instance
         batch_service = BatchService(batch_create)
+
+        # Validate the FILE before saying yes.
+        #
+        # This used to queue the work and return 200 immediately, so a file that
+        # could never succeed still produced "Batch processing started" on the
+        # admin's screen. On 2026-09-19 a roster headed `Name,Email` was
+        # rejected by the case-sensitive column check inside the background
+        # task; the caller saw success, no trainees were created, and the only
+        # trace was an email. "Started" is not a promise anyone can act on if it
+        # is returned for work that has already failed.
+        #
+        # Only the cheap, deterministic checks run here — parse the file, check
+        # the required columns, check for empty required cells. The slow part
+        # (creating accounts, sending mail) stays in the background where it
+        # belongs.
+        validation_error = batch_service.validate_csv()
+        if validation_error:
+            return BatchProcessingResponse.error_response(
+                error_type=validation_error.get("error_type", "VALIDATION_ERROR"),
+                error_message=validation_error.get("error", "The CSV file could not be validated"),
+                error_location="csv_validation",
+                error_data={"batch": batch, **{k: v for k, v in validation_error.items() if k != "error"}},
+                batch_info={"batch": batch, "admin_email": admin_email},
+            )
+
         background_tasks.add_task(process_batch_background, batch_service)
-        
+
         print("=== Starting Background Processing ===")
-        
+
         return BatchProcessingResponse.success_response(
             message="Batch processing started",
             data={"status": "processing", "batch": batch},

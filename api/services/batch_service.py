@@ -258,7 +258,27 @@ class BatchService:
     #     else:  # "provided"
     #         return email  # Use email as password
 
-    def _read_csv_file(self) -> pd.DataFrame:
+    def validate_csv(self) -> Optional[Dict]:
+        """
+        Run the CSV validation NOW, so a bad file can be refused in the response
+        rather than in an email an hour later.
+
+        The route queues this service as a background task and returns 200
+        "Batch processing started" immediately. That made every validation
+        failure invisible: on 2026-09-19 a roster headed `Name,Email` was
+        rejected here because the column check is case-sensitive, the admin's
+        screen said success, and zero trainees were created. The only signal was
+        an admin email.
+
+        Returns the failure dict `_read_csv_file` produces, or None when the file
+        is fine. Cheap enough to run inline — it is a parse and two column
+        checks, and the file is already in memory.
+        """
+        outcome = self._read_csv_file()
+        return outcome if isinstance(outcome, dict) else None
+
+    # Returns a DataFrame on success, or a failure dict — see validate_csv.
+    def _read_csv_file(self):
         """Read and validate CSV file"""
         try:
             bytes_io = io.BytesIO(self.file_content)
@@ -267,7 +287,13 @@ class BatchService:
                 delimiter=self.config.delimiter,
                 encoding=self.config.encoding
             )
-            df.columns = df.columns.str.strip()
+            # .str.lower() as well as .str.strip(). The header check was
+            # case-sensitive while every client's was not — tenx-app lowered
+            # headers before validating, so `Name,Email` passed in the browser
+            # and was rejected here. Whitespace was already forgiven; case is
+            # the same class of difference and there is no reason to treat a
+            # column called "Email" as a different column from "email".
+            df.columns = df.columns.str.strip().str.lower()
 
             # Validate required columns
             required_columns = {'name', 'email'}
