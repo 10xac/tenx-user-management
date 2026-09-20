@@ -119,6 +119,43 @@ class TraineeService:
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")
 
+    def _confirm_user(self, user_id) -> bool:
+        """
+        Confirm the account we just registered.
+
+        /api/auth/local/register leaves confirmed=false, and an unconfirmed
+        account cannot sign in whatever its password is - Strapi answers "Your
+        account email is not confirmed". Since this service never sends the
+        confirmation email either (trainee email is disabled here), an account
+        created and left unconfirmed can never be signed into by anybody, ever.
+
+        That is not theoretical. On 2026-09-20, 39 app accounts were sitting
+        unconfirmed, 13 of them the Re-entry School intake created the day
+        before: enrolled, listed, counted as successful, and locked out.
+
+        Failure is logged and swallowed rather than raised. The trainee record
+        is the thing that matters and it already exists by now; turning an
+        unconfirmed account into a rolled-back enrolment would trade a fixable
+        problem for a lost one.
+        """
+        try:
+            response = requests.put(
+                f"{self.sm.apiroot}/api/users/{user_id}",
+                json={"confirmed": True},
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.sm.token}",
+                },
+                timeout=30,
+            )
+            if response.status_code != 200:
+                print(f"[!] could not confirm user {user_id}: {response.status_code} {response.text[:200]}")
+                return False
+            return True
+        except Exception as exc:
+            print(f"[!] could not confirm user {user_id}: {exc}")
+            return False
+
     def create_unconfirmed_user(self, user_data):
         """
         Create an unconfirmed user using the provided user data and return the result in JSON format.
@@ -206,8 +243,9 @@ class TraineeService:
                     return result_json
                 user_id = result_json['user']['id']
             print("user_id...", user_id)
-            
+
             self.created_resources['user_id'] = user_id
+            self._confirm_user(user_id)
         except Exception as e:
             self._cleanup_resources('user')
             return TraineeResponse.error_response(
