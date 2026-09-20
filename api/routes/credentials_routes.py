@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Form
 from typing import Dict, List, Optional
 import json
+import time
 import traceback
 
 import requests
@@ -82,7 +83,7 @@ async def reset_trainee_credentials(
         return {"success": False, "error": {"error_type": "VALIDATION_ERROR", "error_message": "No emails given"}}
 
     sm = StrapiMethods(run_stage=run_stage)
-    done, failed = [], []
+    done, failed, unverified = [], [], []
 
     for email in wanted:
         try:
@@ -108,17 +109,43 @@ async def reset_trainee_credentials(
             # Prove it, rather than trust the 200. A PUT that stores a password
             # the user cannot then log in with is the failure this whole
             # endpoint exists to undo, and it would report success.
-            check = requests.post(
-                f"{sm.apiroot}/api/auth/local",
-                json={"identifier": email, "password": email},
-                timeout=30,
-            )
-            if check.status_code != 200:
+            #
+            # Paced, and 429 is NOT a failure. Strapi rate-limits
+            # /api/auth/local, so verifying a whole cohort back to back trips
+            # the limiter partway down the list. The first run of this endpoint
+            # reset 25 passwords, verified 10, and reported the other 15 as
+            # failures - so fifteen people had their password changed and were
+            # never told, which is worse than not having run it at all.
+            check = None
+            for attempt in range(3):
+                check = requests.post(
+                    f"{sm.apiroot}/api/auth/local",
+                    json={"identifier": email, "password": email},
+                    timeout=30,
+                )
+                if check.status_code != 429:
+                    break
+                time.sleep(2 * (attempt + 1))
+
+            if check is not None and check.status_code == 429:
+                # The password IS set; only the proof is missing. Reported as
+                # done-but-unverified and still emailed, because withholding
+                # the credentials of an account we have just changed is the
+                # one outcome with no way back for the trainee.
+                unverified.append({"email": email, "reason": "Rate limited before sign-in could be checked"})
+                done.append({"email": email, "username": user.get("username")})
+                time.sleep(1.0)
+                continue
+
+            if check is None or check.status_code != 200:
                 failed.append({
                     "email": email,
-                    "reason": f"Password was set but sign-in still fails: {check.text[:160]}",
+                    "reason": f"Password was set but sign-in still fails: {check.text[:160] if check else 'no response'}",
                 })
                 continue
+
+            # Space the next one out. Cheap next to emailing a cohort twice.
+            time.sleep(1.0)
 
             done.append({"email": email, "username": user.get("username")})
 
@@ -145,6 +172,7 @@ async def reset_trainee_credentials(
 
     logger.info("Trainee credentials reset", extra={
         "requested": len(wanted), "reset": len(done), "failed": len(failed),
+        "unverified": len(unverified),
         "emailed": len(emailed), "by": current_user.get("email"),
     })
 
@@ -153,6 +181,7 @@ async def reset_trainee_credentials(
         "message": f"{len(done)} of {len(wanted)} trainees can now sign in with their email as password",
         "data": {
             "reset": done,
+            "unverified": unverified,
             "failed": failed,
             "emailed": emailed,
             "email_failures": email_failures,
