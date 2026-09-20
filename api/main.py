@@ -2,7 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
-from api.routes import trainee_routes, batch_routes, webhook_routes, env_routes
+from api.routes import (
+    trainee_routes, batch_routes, webhook_routes, env_routes,
+    credentials_routes, enrolment_routes,
+)
 from api.core.error_handlers import validation_exception_handler, pydantic_validation_exception_handler
 from typing import List
 
@@ -36,6 +39,8 @@ app.include_router(trainee_routes.router)
 app.include_router(batch_routes.router)
 app.include_router(webhook_routes.router)
 app.include_router(env_routes.router)
+app.include_router(credentials_routes.router)
+app.include_router(enrolment_routes.router)
 
 if __name__ == "__main__":
     import uvicorn
