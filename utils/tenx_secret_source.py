@@ -91,14 +91,18 @@ def _decode_non_string(raw: Dict[str, str]) -> Dict[str, Any]:
 
 
 def _fetch_tree(name: str, ssm_client) -> Dict[str, str]:
-    """All parameters under ``/<name>/`` keyed by their path relative to it."""
+    """``_meta`` markers and SecureString parameters under ``/<name>/``, keyed by relative path."""
     prefix = "/" + name.strip("/") + "/"
     params: Dict[str, str] = {}
     kwargs = {"Path": prefix, "Recursive": True, "WithDecryption": True}
     while True:
         page = ssm_client.get_parameters_by_path(**kwargs)
         for param in page.get("Parameters", []):
-            params[param["Name"][len(prefix):]] = param["Value"]
+            key = param["Name"][len(prefix):]
+            # Secret values are SecureString; plain String/StringList parameters that
+            # share the path (e.g. /tenx/workers/<svc>/image switches) are not ours.
+            if key == "_meta" or key.endswith("/_meta") or param.get("Type", "SecureString") == "SecureString":
+                params[key] = param["Value"]
         token = page.get("NextToken")
         if not token:
             return params

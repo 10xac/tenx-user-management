@@ -195,6 +195,21 @@ def test_nested_secret_tree_is_excluded():
         assert tss.get_secret_dict(NAME, ssm_client=ssm, sm_client=sm) == original
 
 
+def test_plain_string_parameters_sharing_the_path_are_ignored():
+    # /tenx/workers/<svc>/{image,enabled,...} are String switches living under a secret's path.
+    original = {"API_KEY": "k"}
+    ssm, sm, s_ssm, _ = _clients()
+    params = [
+        _param("API_KEY", "k"),
+        {"Name": PREFIX + "image", "Value": "repo:tag", "Type": "String"},
+        {"Name": PREFIX + "allow", "Value": "a,b", "Type": "StringList"},
+        {"Name": PREFIX + "_meta", "Value": _meta(original), "Type": "String"},
+    ]
+    _expect_tree(s_ssm, [params])
+    with s_ssm:
+        assert tss.get_secret_dict(NAME, ssm_client=ssm, sm_client=sm) == original
+
+
 def test_invalid_source_value(monkeypatch):
     monkeypatch.setenv("TENX_SECRET_SOURCE", "vault")
     with pytest.raises(tss.SecretSourceError):
