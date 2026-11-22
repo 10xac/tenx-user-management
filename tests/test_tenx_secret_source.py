@@ -210,6 +210,56 @@ def test_plain_string_parameters_sharing_the_path_are_ignored():
         assert tss.get_secret_dict(NAME, ssm_client=ssm, sm_client=sm) == original
 
 
+def test_empty_keys_are_restored_before_count_and_hash():
+    original = {"A": "x", "EMPTY1": "", "EMPTY2": ""}
+    ssm, sm, s_ssm, _ = _clients()
+    meta = _meta(original, empty_keys=["EMPTY1", "EMPTY2"])
+    _expect_tree(s_ssm, [[_param("A", "x"), {"Name": PREFIX + "_meta", "Value": meta, "Type": "String"}]])
+    with s_ssm:
+        assert tss.get_secret_dict(NAME, ssm_client=ssm, sm_client=sm) == original
+
+
+def test_chunked_values_are_joined_in_numeric_order():
+    big = "".join(str(i % 10) for i in range(30000))
+    original = {"crt": big, "key": "k", "openai/agrader-cb": {"keys": ["v"]}}
+    parts = [big[i:i + 8000] for i in range(0, len(big), 8000)]
+    ssm, sm, s_ssm, _ = _clients()
+    # Return parts out of order (and >10 parts would sort 10 before 2 lexically).
+    params = [_param(f"_chunks/crt/{i}", p) for i, p in reversed(list(enumerate(parts)))]
+    params += [
+        _param("key", "k"),
+        _param("openai/agrader-cb", '{"keys":["v"]}'),
+        _param("_chunks/stale/0", "ignored"),
+        {"Name": PREFIX + "_meta", "Type": "String",
+         "Value": _meta(original, chunks={"crt": len(parts)}, json_keys=["openai/agrader-cb"])},
+    ]
+    _expect_tree(s_ssm, [params])
+    with s_ssm:
+        assert tss.get_secret_dict(NAME, ssm_client=ssm, sm_client=sm) == original
+
+
+def test_chunked_plain_value():
+    raw = "x" * 9000 + "y" * 9000
+    ssm, sm, s_ssm, _ = _clients()
+    params = [_param("_chunks/_value/0", raw[:8000]), _param("_chunks/_value/1", raw[8000:16000]),
+              _param("_chunks/_value/2", raw[16000:]),
+              {"Name": PREFIX + "_meta", "Value": _meta(raw, fmt="plain", chunks={"_value": 3}), "Type": "String"}]
+    _expect_tree(s_ssm, [params])
+    with s_ssm:
+        assert tss.get_secret_string(NAME, ssm_client=ssm, sm_client=sm) == raw
+
+
+def test_missing_chunk_falls_back():
+    original = {"crt": "abcdef"}
+    ssm, sm, s_ssm, s_sm = _clients()
+    params = [_param("_chunks/crt/0", "abc"),
+              {"Name": PREFIX + "_meta", "Value": _meta(original, chunks={"crt": 2}), "Type": "String"}]
+    _expect_tree(s_ssm, [params])
+    s_sm.add_response("get_secret_value", {"SecretString": json.dumps(original)}, {"SecretId": NAME})
+    with s_ssm, s_sm:
+        assert tss.get_secret_dict(NAME, ssm_client=ssm, sm_client=sm) == original
+
+
 def test_invalid_source_value(monkeypatch):
     monkeypatch.setenv("TENX_SECRET_SOURCE", "vault")
     with pytest.raises(tss.SecretSourceError):

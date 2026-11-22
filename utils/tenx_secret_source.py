@@ -6,7 +6,10 @@ Implements the Tenx "Secrets Manager -> SSM Parameter Store" loader contract:
   as one SecureString per key at ``/<name>/<KEY>``; a non-object secret lives at
   ``/<name>/_value``. A plain String marker ``/<name>/_meta`` holds
   ``{"source", "format": "json"|"plain", "keys": N, "sha256": <10-char prefix>}``
-  and is what tells a reader the tree is complete.
+  and is what tells a reader the tree is complete. Optional ``_meta`` fields:
+  ``json_keys`` (keys holding non-string JSON), ``empty_keys`` (keys whose value
+  is "" and so have no parameter) and ``chunks`` ({KEY: n}: values over 8 KB stored
+  as ``/<name>/_chunks/<KEY>/0..n-1``). Keys containing "/" are deeper paths.
 * ``TENX_SECRET_SOURCE`` selects the backend:
   ``auto`` (default) SSM tree when ``_meta`` exists, else Secrets Manager;
   ``ssm`` SSM only (raise when missing); ``secretsmanager`` old behaviour.
@@ -119,6 +122,18 @@ def _rebuild(name: str, params: Dict[str, str]) -> Tuple[Any, str]:
         for k, v in params.items()
         if k != "_meta" and not any(k.startswith(n) for n in nested)
     }
+    # Values over 8 KB are stored as /<name>/_chunks/<KEY>/0..n-1 (_meta.chunks = {KEY: n});
+    # join them back, then drop every other _chunks/ part. Done before count/hash checks.
+    chunks = meta.get("chunks") or {}
+    for key, count in chunks.items():
+        parts = [f"_chunks/{key}/{i}" for i in range(int(count))]
+        missing = [p for p in parts if p not in values]
+        if missing:
+            raise SecretSourceError(
+                f"SSM tree /{name}/ is incomplete ({len(missing)} chunk(s) of {key} missing)"
+            )
+        values[key] = "".join(values[p] for p in parts)
+    values = {k: v for k, v in values.items() if not k.startswith("_chunks/")}
     fmt = meta.get("format")
     expected = meta.get("sha256")
 
@@ -132,6 +147,9 @@ def _rebuild(name: str, params: Dict[str, str]) -> Tuple[Any, str]:
 
     if fmt != "json":
         raise SecretSourceError(f"SSM tree /{name}/ has unknown format {fmt!r}")
+    # SSM rejects empty values, so keys whose value was "" are listed, not stored.
+    for key in meta.get("empty_keys") or []:
+        values[key] = ""
     if meta.get("keys") is not None and int(meta["keys"]) != len(values):
         raise SecretSourceError(
             f"SSM tree /{name}/ is incomplete ({len(values)} of {meta['keys']} keys)"
